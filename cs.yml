@@ -32,7 +32,12 @@
           - nginx
         state: present
 
-    - name: Create Prometheus user and group
+    - name: Create Prometheus group
+      group:
+        name: "{{ prometheus_group }}"
+        system: yes
+
+    - name: Create Prometheus user
       user:
         name: "{{ prometheus_user }}"
         group: "{{ prometheus_group }}"
@@ -59,15 +64,17 @@
       unarchive:
         src: "/tmp/prometheus.tar.gz"
         dest: "/tmp/"
+        remote_src: yes
         creates: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64"
 
     - name: Move Prometheus binaries
       copy:
         src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
-        dest: "/usr/local/bin/"
+        dest: "/usr/local/bin/{{ item }}"
         owner: root
         group: root
         mode: '0755'
+        remote_src: yes
       loop:
         - prometheus
         - promtool
@@ -80,7 +87,7 @@
         group: "{{ prometheus_group }}"
         mode: '0644'
 
-    - name: Create Prometheus service
+    - name: Create Prometheus systemd service
       copy:
         dest: /etc/systemd/system/prometheus.service
         content: |
@@ -119,10 +126,6 @@
       ufw:
         rule: allow
         port: 9090
-
-    - name: Enable UFW
-      ufw:
-        state: enabled
 
     - name: Generate OpenSSL certificate
       command: openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/nginx-selfsigned.key -out /etc/ssl/certs/nginx-selfsigned.crt
@@ -166,8 +169,16 @@
         content: |
           server {
               listen 80;
-              listen [::]:80;
               server_name example.com;
+              return 301 https://$host$request_uri;
+          }
+
+          server {
+              listen 443 ssl;
+              server_name example.com;
+
+              include snippets/self-signed.conf;
+              include snippets/ssl-params.conf;
 
               location / {
                   proxy_pass http://localhost:9090;
@@ -176,18 +187,14 @@
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                   proxy_set_header X-Forwarded-Proto $scheme;
               }
-
-              listen 443 ssl; # managed by Certbot
-              include snippets/self-signed.conf;
-              include snippets/ssl-params.conf;
           }
       notify:
         - Reload Nginx
 
-    - name: Enable Nginx server block
+    - name: Enable Nginx site for Prometheus
       file:
         src: /etc/nginx/sites-available/prometheus
-        dest: /etc/nginx/sites-enabled/
+        dest: /etc/nginx/sites-enabled/prometheus
         state: link
 
     - name: Remove default Nginx configuration
@@ -197,13 +204,18 @@
       notify:
         - Reload Nginx
 
-  handlers:
-    - name: Reload Nginx
+    - name: Enable and start Nginx
       systemd:
         name: nginx
-        state: reloaded
+        enabled: yes
+        state: started
 
-    - name: Restart Nginx
+    - name: Enable UFW (after all allow rules)
+      ufw:
+        state: enabled
+
+  handlers:
+    - name: Reload Nginx
       systemd:
         name: nginx
         state: restarted

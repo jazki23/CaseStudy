@@ -22,14 +22,18 @@
       apt:
         update_cache: yes
 
-    - name: Install required packages
+    - name: Ensure Nginx is installed
+      apt:
+        name: nginx
+        state: present
+
+    - name: Install other required packages
       apt:
         name:
           - wget
           - tar
           - ufw
           - openssl
-          - nginx
         state: present
 
     - name: Create Prometheus group

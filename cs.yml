@@ -127,8 +127,13 @@
         rule: allow
         port: 9090
 
-    - name: Generate OpenSSL certificate
-      command: openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/nginx-selfsigned.key -out /etc/ssl/certs/nginx-selfsigned.crt
+    - name: Generate OpenSSL certificate (non-interactive)
+      command: >
+        openssl req -x509 -nodes -days 365
+        -newkey rsa:2048
+        -keyout /etc/ssl/private/nginx-selfsigned.key
+        -out /etc/ssl/certs/nginx-selfsigned.crt
+        -subj "/C=US/ST=State/L=City/O=Org/OU=Unit/CN=example.com"
       args:
         creates: /etc/ssl/private/nginx-selfsigned.key
 
@@ -189,6 +194,7 @@
               }
           }
       notify:
+        - Validate Nginx Config
         - Reload Nginx
 
     - name: Enable Nginx site for Prometheus
@@ -202,6 +208,7 @@
         path: /etc/nginx/sites-enabled/default
         state: absent
       notify:
+        - Validate Nginx Config
         - Reload Nginx
 
     - name: Enable and start Nginx
@@ -215,7 +222,18 @@
         state: enabled
 
   handlers:
+    - name: Validate Nginx Config
+      command: nginx -t
+      notify: Restart Nginx
+      register: nginx_test
+      failed_when: nginx_test.rc != 0
+
     - name: Reload Nginx
+      systemd:
+        name: nginx
+        state: reloaded
+
+    - name: Restart Nginx
       systemd:
         name: nginx
         state: restarted
